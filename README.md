@@ -1,6 +1,6 @@
 # California or Portugal? 🌅
 
-A cute little speed-guessing game. A photo flashes for **3 seconds** — guess whether it
+A cute little speed-guessing game. A photo flashes for **5 seconds** — guess whether it
 was taken in **California** or **Portugal**. Score as many as you can in **2 minutes**.
 
 Photos are pulled live from [Wikimedia Commons](https://commons.wikimedia.org/) (free, no

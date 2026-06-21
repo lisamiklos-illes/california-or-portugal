@@ -75,7 +75,7 @@
     background: linear-gradient(90deg, var(--ca), var(--pt));
     transform-origin: left center;
   }
-  .flashbar.run { animation: shrink 3s linear forwards; }
+  .flashbar.run { animation: shrink 5s linear forwards; }
   @keyframes shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
   /* feedback flash overlay */
@@ -129,6 +129,18 @@
     animation: spin 0.9s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .progress {
+    width: 260px; max-width: 80%;
+    height: 10px; border-radius: 999px;
+    background: #2a2f3e; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--ca), var(--pt));
+    border-radius: 999px;
+    transition: width 0.25s ease;
+  }
+  .progress-pct { font-size: 12px; color: var(--muted); margin: 0; font-variant-numeric: tabular-nums; }
 
   /* ---- Controls ---- */
   .controls {
@@ -202,10 +214,12 @@
         <div id="loadingView" class="hidden">
           <div class="spinner"></div>
           <p id="loadingMsg">Gathering photos from both coasts…</p>
+          <div class="progress"><div class="progress-fill" id="progressFill"></div></div>
+          <p class="progress-pct" id="progressPct">0%</p>
         </div>
         <div id="startView">
           <h1><span class="ca">California</span> or <span class="pt">Portugal</span>?</h1>
-          <p>You'll see a photo for <b>3 seconds</b>. Guess where it was taken. Score as many as you can in <b>2 minutes</b>.</p>
+          <p>You'll see a photo for <b>5 seconds</b>. Guess where it was taken. Score as many as you can in <b>2 minutes</b>.</p>
           <p style="font-size:13px">Tip: tap the buttons, or press <b>←</b> for California / <b>→</b> for Portugal.</p>
           <button class="btn" id="startBtn">Start</button>
           <div id="startErr" class="err"></div>
@@ -239,7 +253,7 @@
   ];
   const API = "https://commons.wikimedia.org/w/api.php";
   const TARGET_PER_PLACE = 28; // pool size goal per country
-  const FLASH_MS = 3000;
+  const FLASH_MS = 5000;
   const ROUND_MS = 120000; // 2 minutes
 
   // --- State ---
@@ -258,6 +272,13 @@
   const elScore = $("score"), elStreak = $("streak"), elTimer = $("timer");
   const btnCA = $("guessCA"), btnPT = $("guessPT");
   const credit = $("credit");
+  const progressFill = $("progressFill"), progressPct = $("progressPct");
+
+  function setProgress(p) {
+    const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+    progressFill.style.width = pct + "%";
+    progressPct.textContent = pct + "%";
+  }
 
   function shuffle(a) {
     for (let i = a.length - 1; i > 0; i--) {
@@ -275,6 +296,7 @@
       gsrsearch: query,
       gsrnamespace: "6",      // File namespace
       gsrlimit: "40",
+      gsroffset: String(Math.floor(Math.random() * 40)), // vary results each session
       prop: "imageinfo",
       iiprop: "url|mime|size|extmetadata",
       iiurlwidth: "1000"
@@ -307,29 +329,34 @@
     return out;
   }
 
-  async function buildPool() {
+  async function buildPool(onProgress) {
     const byPlace = { California: [], Portugal: [] };
-    const topics = shuffle(TOPICS.slice());
-    // Round-robin across topics for each place until we have enough.
+    const seen = { California: new Set(), Portugal: new Set() };
+    // Pick a handful of topics per place and fire every request in parallel.
+    const tasks = [];
     for (const place of PLACES) {
-      const seen = new Set();
-      for (const topic of topics) {
-        if (byPlace[place.label].length >= TARGET_PER_PLACE) break;
-        try {
-          const items = await fetchFiles(topic + " " + place.terms, place.label);
-          for (const it of items) {
-            if (seen.has(it.url)) continue;
-            seen.add(it.url);
-            byPlace[place.label].push(it);
-          }
-        } catch (e) { /* skip this topic */ }
+      for (const topic of shuffle(TOPICS.slice()).slice(0, 5)) {
+        tasks.push({ topic, place });
       }
     }
+    let done = 0;
+    await Promise.all(tasks.map(async (t) => {
+      try {
+        const items = await fetchFiles(t.topic + " " + t.place.terms, t.place.label);
+        for (const it of items) {
+          if (seen[t.place.label].has(it.url)) continue;
+          seen[t.place.label].add(it.url);
+          byPlace[t.place.label].push(it);
+        }
+      } catch (e) { /* skip this topic */ }
+      done++;
+      if (onProgress) onProgress(done / tasks.length);
+    }));
     // Balance the two sides so the answer split is roughly even.
     const n = Math.min(byPlace.California.length, byPlace.Portugal.length);
     if (n < 4) throw new Error("not enough images");
-    const ca = shuffle(byPlace.California).slice(0, Math.max(n, 4));
-    const pt = shuffle(byPlace.Portugal).slice(0, Math.max(n, 4));
+    const ca = shuffle(byPlace.California).slice(0, Math.min(n, TARGET_PER_PLACE));
+    const pt = shuffle(byPlace.Portugal).slice(0, Math.min(n, TARGET_PER_PLACE));
     return shuffle(ca.concat(pt));
   }
 
@@ -361,6 +388,10 @@
     if (idx >= queue.length) { endGame(); return; } // ran out of pool
     current = queue[idx];
     photo.src = current.url;
+    // Prefetch the next couple so upcoming flashes stay instant.
+    for (let i = idx + 1; i <= idx + 2; i++) {
+      if (queue[i]) preload(queue[i]).catch(() => {});
+    }
     credit.innerHTML = current.artist
       ? 'Photo: ' + escapeHtml(current.artist) + ' · Wikimedia Commons'
       : 'Photo: Wikimedia Commons';
@@ -452,11 +483,19 @@
     try {
       if (pool.length === 0) {
         loadingMsg.textContent = "Gathering photos from both coasts…";
-        pool = await buildPool();
+        setProgress(0);
+        pool = await buildPool((p) => setProgress(p * 0.8));
         // Warm up the first handful so the opening flash is instant.
-        loadingMsg.textContent = "Loading photos…";
-        const warm = pool.slice(0, 6).map((it) => preload(it).catch(() => null));
-        await Promise.all(warm);
+        loadingMsg.textContent = "Loading first photos…";
+        const warm = pool.slice(0, 5);
+        let w = 0;
+        await Promise.all(warm.map((it) =>
+          preload(it).catch(() => null).then(() => {
+            w++;
+            setProgress(0.8 + (w / warm.length) * 0.2);
+          })
+        ));
+        setProgress(1);
       }
       loadingView.classList.add("hidden");
       startGame();
