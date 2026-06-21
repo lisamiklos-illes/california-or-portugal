@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>California or Portugal?</title>
+<style>
+  :root {
+    --ca: #ff7a59;     /* sunset orange */
+    --pt: #2a9d8f;     /* atlantic teal */
+    --bg: #11131a;
+    --card: #1b1e29;
+    --text: #f2f4f8;
+    --muted: #9aa3b2;
+    --good: #3ddc84;
+    --bad: #ff5c6c;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 800px at 20% -10%, #232a3d 0%, var(--bg) 55%);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    width: min(680px, 100%);
+    background: var(--card);
+    border: 1px solid #2a2f3e;
+    border-radius: 22px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    overflow: hidden;
+  }
+
+  /* ---- Top bar ---- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid #2a2f3e;
+    font-variant-numeric: tabular-nums;
+  }
+  .topbar .stat { font-size: 14px; color: var(--muted); }
+  .topbar .stat b { color: var(--text); font-size: 18px; }
+  .timer { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
+  .timer.warn { color: var(--bad); }
+
+  /* ---- Stage ---- */
+  .stage {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    background: #0c0e14;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .stage img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  /* countdown bar for the 3s flash */
+  .flashbar {
+    position: absolute;
+    left: 0; top: 0;
+    height: 5px;
+    width: 100%;
+    background: linear-gradient(90deg, var(--ca), var(--pt));
+    transform-origin: left center;
+  }
+  .flashbar.run { animation: shrink 3s linear forwards; }
+  @keyframes shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+  /* feedback flash overlay */
+  .verdict {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 42px;
+    font-weight: 800;
+    opacity: 0;
+    pointer-events: none;
+    text-shadow: 0 2px 18px rgba(0,0,0,0.6);
+  }
+  .verdict .sub { font-size: 18px; font-weight: 600; }
+  .verdict.show { animation: pop 0.7s ease forwards; }
+  .verdict.good { background: rgba(61,220,132,0.18); color: var(--good); }
+  .verdict.bad  { background: rgba(255,92,108,0.18); color: var(--bad); }
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(0.8); }
+    20% { opacity: 1; transform: scale(1.05); }
+    80% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1); }
+  }
+
+  /* center overlays (start / loading / results) */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(12,14,20,0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 28px;
+    gap: 14px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 { margin: 0; font-size: 30px; }
+  .overlay h1 .ca { color: var(--ca); }
+  .overlay h1 .pt { color: var(--pt); }
+  .overlay p { margin: 0; color: var(--muted); max-width: 420px; line-height: 1.5; }
+  .big { font-size: 54px; font-weight: 800; margin: 4px 0; }
+  .spinner {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 4px solid #2a2f3e; border-top-color: var(--ca);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---- Controls ---- */
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 16px 20px 22px;
+  }
+  .guess {
+    appearance: none;
+    border: none;
+    border-radius: 16px;
+    padding: 18px 12px;
+    font-size: 19px;
+    font-weight: 700;
+    color: #0c0e14;
+    cursor: pointer;
+    transition: transform 0.08s ease, filter 0.15s ease, opacity 0.15s ease;
+  }
+  .guess:active { transform: translateY(2px) scale(0.99); }
+  .guess.ca { background: var(--ca); }
+  .guess.pt { background: var(--pt); color: #04201c; }
+  .guess .key { display: block; font-size: 12px; font-weight: 600; opacity: 0.65; margin-top: 4px; }
+  .guess:disabled { opacity: 0.4; cursor: default; }
+
+  .btn {
+    appearance: none;
+    border: none;
+    border-radius: 14px;
+    padding: 14px 26px;
+    font-size: 17px;
+    font-weight: 700;
+    color: #0c0e14;
+    background: linear-gradient(90deg, var(--ca), var(--pt));
+    cursor: pointer;
+  }
+  .btn:active { transform: translateY(1px); }
+  .credit { font-size: 11px; color: var(--muted); padding: 0 20px 16px; text-align: center; }
+  .credit a { color: var(--muted); }
+  .byline {
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+    padding: 0 20px 18px;
+  }
+  .byline a {
+    color: var(--text);
+    font-weight: 600;
+    text-decoration: none;
+    border-bottom: 1px solid var(--pt);
+  }
+  .byline a:hover { color: var(--pt); }
+  .err { color: var(--bad); font-size: 14px; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="stat">Score <b id="score">0</b></div>
+      <div class="timer" id="timer">2:00</div>
+      <div class="stat">Streak <b id="streak">0</b></div>
+    </div>
+
+    <div class="stage" id="stage">
+      <img id="photo" alt="" />
+      <div class="flashbar" id="flashbar"></div>
+      <div class="verdict" id="verdict"></div>
+
+      <!-- Start / Loading / Results overlay -->
+      <div class="overlay" id="overlay">
+        <div id="loadingView" class="hidden">
+          <div class="spinner"></div>
+          <p id="loadingMsg">Gathering photos from both coasts…</p>
+        </div>
+        <div id="startView">
+          <h1><span class="ca">California</span> or <span class="pt">Portugal</span>?</h1>
+          <p>You'll see a photo for <b>3 seconds</b>. Guess where it was taken. Score as many as you can in <b>2 minutes</b>.</p>
+          <p style="font-size:13px">Tip: tap the buttons, or press <b>←</b> for California / <b>→</b> for Portugal.</p>
+          <button class="btn" id="startBtn">Start</button>
+          <div id="startErr" class="err"></div>
+        </div>
+        <div id="resultView" class="hidden">
+          <p>Time! You scored</p>
+          <div class="big" id="finalScore">0</div>
+          <p id="finalDetail"></p>
+          <button class="btn" id="againBtn">Play again</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="guess ca" id="guessCA" disabled>California<span class="key">← left</span></button>
+      <button class="guess pt" id="guessPT" disabled>Portugal<span class="key">right →</span></button>
+    </div>
+    <div class="credit" id="credit"></div>
+    <div class="byline">Built by <a href="https://lisamiklos-illes.com" target="_blank" rel="noopener">Lisa Miklos-Illes</a></div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // --- Topics chosen so CA & PT photos look genuinely similar ---
+  const TOPICS = ["beach", "coast", "cliffs", "lighthouse", "vineyard", "harbour", "surf", "coastline"];
+  const PLACES = [
+    { label: "California", terms: "California" },
+    { label: "Portugal",   terms: "Portugal" }
+  ];
+  const API = "https://commons.wikimedia.org/w/api.php";
+  const TARGET_PER_PLACE = 28; // pool size goal per country
+  const FLASH_MS = 3000;
+  const ROUND_MS = 120000; // 2 minutes
+
+  // --- State ---
+  let pool = [];          // {url, label, title, descUrl}
+  let queue = [];         // shuffled play order
+  let idx = 0;
+  let score = 0, streak = 0, bestStreak = 0, answered = 0, correct = 0;
+  let roundEndAt = 0;
+  let flashTimer = null, tick = null, locked = true, current = null;
+
+  // --- Elements ---
+  const $ = (id) => document.getElementById(id);
+  const photo = $("photo"), flashbar = $("flashbar"), verdict = $("verdict");
+  const overlay = $("overlay"), startView = $("startView"), loadingView = $("loadingView");
+  const resultView = $("resultView"), loadingMsg = $("loadingMsg"), startErr = $("startErr");
+  const elScore = $("score"), elStreak = $("streak"), elTimer = $("timer");
+  const btnCA = $("guessCA"), btnPT = $("guessPT");
+  const credit = $("credit");
+
+  function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // Fetch a batch of file results for a search query, return normalized items.
+  async function fetchFiles(query, label) {
+    const params = new URLSearchParams({
+      action: "query", format: "json", origin: "*",
+      generator: "search",
+      gsrsearch: query,
+      gsrnamespace: "6",      // File namespace
+      gsrlimit: "40",
+      prop: "imageinfo",
+      iiprop: "url|mime|size|extmetadata",
+      iiurlwidth: "1000"
+    });
+    const res = await fetch(API + "?" + params.toString());
+    if (!res.ok) throw new Error("network");
+    const data = await res.json();
+    const pages = (data.query && data.query.pages) || {};
+    const out = [];
+    for (const k in pages) {
+      const info = pages[k].imageinfo && pages[k].imageinfo[0];
+      if (!info) continue;
+      if (info.mime !== "image/jpeg") continue;       // photos only
+      if (!info.thumburl) continue;
+      if ((info.width || 0) < 700) continue;          // skip tiny
+      const title = (pages[k].title || "").toLowerCase();
+      // skip non-photo-ish files
+      if (/\b(map|logo|diagram|coat of arms|chart|icon|sign|plan|flag)\b/.test(title)) continue;
+      const meta = info.extmetadata || {};
+      const artist = meta.Artist && meta.Artist.value
+        ? meta.Artist.value.replace(/<[^>]+>/g, "").trim() : "";
+      out.push({
+        url: info.thumburl,
+        label,
+        title: pages[k].title.replace(/^File:/, ""),
+        descUrl: info.descriptionurl || "",
+        artist
+      });
+    }
+    return out;
+  }
+
+  async function buildPool() {
+    const byPlace = { California: [], Portugal: [] };
+    const topics = shuffle(TOPICS.slice());
+    // Round-robin across topics for each place until we have enough.
+    for (const place of PLACES) {
+      const seen = new Set();
+      for (const topic of topics) {
+        if (byPlace[place.label].length >= TARGET_PER_PLACE) break;
+        try {
+          const items = await fetchFiles(topic + " " + place.terms, place.label);
+          for (const it of items) {
+            if (seen.has(it.url)) continue;
+            seen.add(it.url);
+            byPlace[place.label].push(it);
+          }
+        } catch (e) { /* skip this topic */ }
+      }
+    }
+    // Balance the two sides so the answer split is roughly even.
+    const n = Math.min(byPlace.California.length, byPlace.Portugal.length);
+    if (n < 4) throw new Error("not enough images");
+    const ca = shuffle(byPlace.California).slice(0, Math.max(n, 4));
+    const pt = shuffle(byPlace.Portugal).slice(0, Math.max(n, 4));
+    return shuffle(ca.concat(pt));
+  }
+
+  // Preload an image element; resolves on load, rejects on error.
+  function preload(item) {
+    return new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(item);
+      im.onerror = () => reject(item);
+      im.src = item.url;
+    });
+  }
+
+  function fmtTime(ms) {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    const m = Math.floor(s / 60);
+    return m + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function setTimerDisplay() {
+    const left = roundEndAt - Date.now();
+    elTimer.textContent = fmtTime(left);
+    elTimer.classList.toggle("warn", left <= 15000);
+    if (left <= 0) endGame();
+  }
+
+  function showImage() {
+    if (Date.now() >= roundEndAt) { endGame(); return; }
+    if (idx >= queue.length) { endGame(); return; } // ran out of pool
+    current = queue[idx];
+    photo.src = current.url;
+    credit.innerHTML = current.artist
+      ? 'Photo: ' + escapeHtml(current.artist) + ' · Wikimedia Commons'
+      : 'Photo: Wikimedia Commons';
+    // restart flash bar animation
+    flashbar.classList.remove("run");
+    void flashbar.offsetWidth; // reflow to reset animation
+    flashbar.classList.add("run");
+    locked = false;
+    btnCA.disabled = false;
+    btnPT.disabled = false;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { if (!locked) resolve(null); }, FLASH_MS);
+  }
+
+  function resolve(guess) {
+    if (locked) return;
+    locked = true;
+    btnCA.disabled = true;
+    btnPT.disabled = true;
+    flashbar.classList.remove("run");
+    clearTimeout(flashTimer);
+
+    const truth = current.label;
+    answered++;
+    let isCorrect = guess === truth;
+    if (guess === null) isCorrect = false; // timed out
+
+    verdict.className = "verdict show " + (isCorrect ? "good" : "bad");
+    if (isCorrect) {
+      score++; correct++; streak++; bestStreak = Math.max(bestStreak, streak);
+      verdict.innerHTML = "✓ " + truth + '<span class="sub">+1</span>';
+    } else {
+      streak = 0;
+      const head = guess === null ? "Too slow!" : "✗ Nope";
+      verdict.innerHTML = head + '<span class="sub">It was ' + truth + "</span>";
+    }
+    elScore.textContent = score;
+    elStreak.textContent = streak;
+
+    idx++;
+    setTimeout(() => {
+      verdict.className = "verdict";
+      showImage();
+    }, 650);
+  }
+
+  function startGame() {
+    score = 0; streak = 0; bestStreak = 0; answered = 0; correct = 0; idx = 0;
+    elScore.textContent = "0";
+    elStreak.textContent = "0";
+    queue = shuffle(pool.slice());
+    overlay.classList.add("hidden");
+    roundEndAt = Date.now() + ROUND_MS;
+    clearInterval(tick);
+    tick = setInterval(setTimerDisplay, 200);
+    setTimerDisplay();
+    showImage();
+  }
+
+  function endGame() {
+    if (overlay.classList.contains("hidden") === false && resultView.classList.contains("hidden") === false) return;
+    clearInterval(tick);
+    clearTimeout(flashTimer);
+    locked = true;
+    btnCA.disabled = true;
+    btnPT.disabled = true;
+    flashbar.classList.remove("run");
+    verdict.className = "verdict";
+    elTimer.textContent = "0:00";
+    $("finalScore").textContent = score;
+    const acc = answered ? Math.round((correct / answered) * 100) : 0;
+    $("finalDetail").textContent =
+      correct + " correct of " + answered + " · " + acc + "% accuracy · best streak " + bestStreak;
+    startView.classList.add("hidden");
+    loadingView.classList.add("hidden");
+    resultView.classList.remove("hidden");
+    overlay.classList.remove("hidden");
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  async function loadAndStart() {
+    startView.classList.add("hidden");
+    resultView.classList.add("hidden");
+    loadingView.classList.remove("hidden");
+    startErr.textContent = "";
+    try {
+      if (pool.length === 0) {
+        loadingMsg.textContent = "Gathering photos from both coasts…";
+        pool = await buildPool();
+        // Warm up the first handful so the opening flash is instant.
+        loadingMsg.textContent = "Loading photos…";
+        const warm = pool.slice(0, 6).map((it) => preload(it).catch(() => null));
+        await Promise.all(warm);
+      }
+      loadingView.classList.add("hidden");
+      startGame();
+    } catch (e) {
+      loadingView.classList.add("hidden");
+      startView.classList.remove("hidden");
+      startErr.textContent = "Couldn't load images. Check your connection and try again.";
+    }
+  }
+
+  // --- Wire up ---
+  $("startBtn").addEventListener("click", loadAndStart);
+  $("againBtn").addEventListener("click", loadAndStart);
+  btnCA.addEventListener("click", () => resolve("California"));
+  btnPT.addEventListener("click", () => resolve("Portugal"));
+  document.addEventListener("keydown", (e) => {
+    if (locked) return;
+    if (e.key === "ArrowLeft") resolve("California");
+    else if (e.key === "ArrowRight") resolve("Portugal");
+  });
+})();
+</script>
+</body>
+</html>
