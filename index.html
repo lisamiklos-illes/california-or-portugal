@@ -283,6 +283,20 @@
   }
   .byline a:hover { color: var(--pt); }
   .err { color: var(--bad); font-size: 14px; }
+  .link {
+    appearance: none;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 4px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .link:hover { color: var(--text); }
+  .leaderboard .empty { color: var(--muted); font-size: 14px; margin: 0; }
 </style>
 </head>
 <body>
@@ -312,6 +326,7 @@
             <p class="status"><span id="loadStatus">Loading photos…</span> <span id="progressPct">0%</span></p>
           </div>
           <button class="btn" id="startBtn" disabled>Loading…</button>
+          <button class="link" id="viewLbStart">🏆 View leaderboard</button>
           <div id="startErr" class="err"></div>
         </div>
         <div id="pauseView" class="hidden">
@@ -325,6 +340,12 @@
           <p id="finalDetail"></p>
           <div class="leaderboard" id="leaderboard"></div>
           <button class="btn" id="againBtn">Play again</button>
+          <button class="link" id="viewLbResult">🏆 View full leaderboard</button>
+        </div>
+        <div id="lbView" class="hidden">
+          <h1>🏆 Leaderboard</h1>
+          <div class="leaderboard" id="leaderboardFull"></div>
+          <button class="btn" id="lbBackBtn">Back</button>
         </div>
       </div>
     </div>
@@ -378,6 +399,8 @@
   const startBtn = $("startBtn"), loadStatus = $("loadStatus"), loadblock = $("loadblock");
   const pauseBtn = $("pauseBtn"), pauseView = $("pauseView");
   const nameInput = $("nameInput"), leaderboardEl = $("leaderboard");
+  const lbView = $("lbView"), leaderboardFullEl = $("leaderboardFull");
+  let lbReturn = null;
   let ready = false;
 
   // --- Local leaderboard (saved in this browser) ---
@@ -393,17 +416,21 @@
     try { localStorage.setItem(LB_KEY, JSON.stringify(top)); } catch (e) {}
     return top;
   }
-  function renderLeaderboard(highlightId) {
-    const list = loadLB().slice(0, 5);
-    if (!list.length) { leaderboardEl.innerHTML = ""; return; }
-    let html = '<div class="lb-title">🏆 Top scores</div><ol class="lb-list">';
+  function renderInto(el, highlightId, limit, title) {
+    const list = loadLB().slice(0, limit);
+    if (!list.length) { el.innerHTML = '<p class="empty">No scores yet — play a round!</p>'; return; }
+    let html = title ? '<div class="lb-title">' + title + '</div>' : '';
+    html += '<ol class="lb-list">';
     list.forEach((e) => {
       const cls = e.id === highlightId ? ' class="me"' : '';
       html += '<li' + cls + '><span class="lb-name">' + escapeHtml(e.name) +
         '</span><span class="lb-score">' + e.score + '</span></li>';
     });
     html += '</ol>';
-    leaderboardEl.innerHTML = html;
+    el.innerHTML = html;
+  }
+  function renderLeaderboard(highlightId) {
+    renderInto(leaderboardEl, highlightId, 5, "🏆 Top scores");
   }
 
   function setProgress(p) {
@@ -772,6 +799,21 @@
     prepare(true);  // brand-new, non-repeating set, then auto-start
   }
 
+  function openLeaderboard(returnView) {
+    lbReturn = returnView;
+    renderInto(leaderboardFullEl, null, 25, null);
+    startView.classList.add("hidden");
+    resultView.classList.add("hidden");
+    pauseView.classList.add("hidden");
+    lbView.classList.remove("hidden");
+    overlay.classList.remove("hidden");
+  }
+
+  function closeLeaderboard() {
+    lbView.classList.add("hidden");
+    (lbReturn || startView).classList.remove("hidden");
+  }
+
   function startScreenVisible() {
     return !overlay.classList.contains("hidden") && !startView.classList.contains("hidden");
   }
@@ -781,6 +823,9 @@
   $("againBtn").addEventListener("click", playAgain);
   pauseBtn.addEventListener("click", pauseGame);
   $("resumeBtn").addEventListener("click", resumeGame);
+  $("viewLbStart").addEventListener("click", () => openLeaderboard(startView));
+  $("viewLbResult").addEventListener("click", () => openLeaderboard(resultView));
+  $("lbBackBtn").addEventListener("click", closeLeaderboard);
   btnCA.addEventListener("click", () => resolve("California"));
   btnPT.addEventListener("click", () => resolve("Portugal"));
   nameInput.addEventListener("keydown", (e) => {
@@ -788,6 +833,11 @@
   });
   document.addEventListener("keydown", (e) => {
     const k = e.key;
+    // Close the leaderboard view with Esc/Enter.
+    if (!lbView.classList.contains("hidden")) {
+      if (k === "Escape" || k === "Enter") { e.preventDefault(); closeLeaderboard(); }
+      return;
+    }
     // Resume from pause with Enter/Space/Esc/P.
     if (paused) {
       if (k === "Enter" || k === " " || k === "Escape" || k === "p" || k === "P") {
