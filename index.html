@@ -134,6 +134,8 @@
     gap: 13px;
     width: 100%;
   }
+  /* Must out-specify ".overlay > div" so hidden views actually stay hidden. */
+  .overlay > div.hidden { display: none; }
   .overlay h1 { margin: 0; font-size: 26px; line-height: 1.2; }
   .overlay h1 .ca { color: var(--ca); }
   .overlay h1 .pt { color: var(--pt); }
