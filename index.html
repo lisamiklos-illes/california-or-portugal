@@ -109,29 +109,41 @@
   .overlay {
     position: absolute;
     inset: 0;
-    background: rgba(12,14,20,0.92);
+    background: rgba(12,14,20,0.94);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 28px;
-    gap: 14px;
+    padding: 40px 32px;
+    gap: 22px;
   }
   .overlay.hidden { display: none; }
-  .overlay h1 { margin: 0; font-size: 30px; }
+  .overlay > div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+    width: 100%;
+  }
+  .overlay h1 { margin: 0; font-size: 32px; line-height: 1.2; }
   .overlay h1 .ca { color: var(--ca); }
   .overlay h1 .pt { color: var(--pt); }
-  .overlay p { margin: 0; color: var(--muted); max-width: 420px; line-height: 1.5; }
-  .big { font-size: 54px; font-weight: 800; margin: 4px 0; }
-  .spinner {
-    width: 34px; height: 34px; border-radius: 50%;
-    border: 4px solid #2a2f3e; border-top-color: var(--ca);
-    animation: spin 0.9s linear infinite;
+  .overlay p { margin: 0; color: var(--text); max-width: 400px; line-height: 1.6; }
+  .overlay .hint { color: var(--muted); font-size: 14px; }
+  .big { font-size: 60px; font-weight: 800; margin: 6px 0; }
+
+  /* loading / ready block */
+  .loadblock {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .loadblock.hidden { display: none; }
   .progress {
-    width: 260px; max-width: 80%;
+    width: 280px; max-width: 85%;
     height: 10px; border-radius: 999px;
     background: #2a2f3e; overflow: hidden;
   }
@@ -141,21 +153,22 @@
     border-radius: 999px;
     transition: width 0.25s ease;
   }
-  .progress-pct { font-size: 12px; color: var(--muted); margin: 0; font-variant-numeric: tabular-nums; }
+  .status { font-size: 13px; color: var(--muted); margin: 0; font-variant-numeric: tabular-nums; }
+  .status.ready { color: var(--good); font-size: 15px; font-weight: 600; }
 
   /* ---- Controls ---- */
   .controls {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 16px 20px 22px;
+    gap: 16px;
+    padding: 22px 24px;
   }
   .guess {
     appearance: none;
     border: none;
     border-radius: 16px;
-    padding: 18px 12px;
-    font-size: 19px;
+    padding: 20px 12px;
+    font-size: 20px;
     font-weight: 700;
     color: #0c0e14;
     cursor: pointer;
@@ -164,28 +177,35 @@
   .guess:active { transform: translateY(2px) scale(0.99); }
   .guess.ca { background: var(--ca); }
   .guess.pt { background: var(--pt); color: #04201c; }
-  .guess .key { display: block; font-size: 12px; font-weight: 600; opacity: 0.65; margin-top: 4px; }
+  .guess .key { display: block; font-size: 12px; font-weight: 600; opacity: 0.65; margin-top: 5px; }
   .guess:disabled { opacity: 0.4; cursor: default; }
 
   .btn {
     appearance: none;
     border: none;
     border-radius: 14px;
-    padding: 14px 26px;
-    font-size: 17px;
+    padding: 16px 36px;
+    font-size: 18px;
     font-weight: 700;
     color: #0c0e14;
     background: linear-gradient(90deg, var(--ca), var(--pt));
     cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.2s ease, opacity 0.2s ease;
   }
   .btn:active { transform: translateY(1px); }
-  .credit { font-size: 11px; color: var(--muted); padding: 0 20px 16px; text-align: center; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn.ready { animation: btnpulse 1.6s ease-in-out infinite; }
+  @keyframes btnpulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(61,220,132,0.0); transform: scale(1); }
+    50% { box-shadow: 0 0 0 8px rgba(61,220,132,0.12); transform: scale(1.03); }
+  }
+  .credit { font-size: 11px; color: var(--muted); padding: 4px 24px 14px; text-align: center; }
   .credit a { color: var(--muted); }
   .byline {
     font-size: 13px;
     color: var(--muted);
     text-align: center;
-    padding: 0 20px 18px;
+    padding: 0 24px 22px;
   }
   .byline a {
     color: var(--text);
@@ -212,17 +232,15 @@
 
       <!-- Start / Loading / Results overlay -->
       <div class="overlay" id="overlay">
-        <div id="loadingView" class="hidden">
-          <div class="spinner"></div>
-          <p id="loadingMsg">Gathering photos from both coasts…</p>
-          <div class="progress"><div class="progress-fill" id="progressFill"></div></div>
-          <p class="progress-pct" id="progressPct">0%</p>
-        </div>
         <div id="startView">
           <h1><span class="ca">California</span> or <span class="pt">Portugal</span>?</h1>
-          <p>You'll see a photo for <b>5 seconds</b>. Guess where it was taken. Score as many as you can in <b>2 minutes</b>.</p>
-          <p style="font-size:13px">Tip: tap the buttons, or press <b>←</b> for California / <b>→</b> for Portugal.</p>
-          <button class="btn" id="startBtn">Start</button>
+          <p>You'll see a photo for <b>5 seconds</b>. Guess where it was taken — score as many as you can in <b>2 minutes</b>.</p>
+          <p class="hint">Tap the buttons, or press <b>←</b> for California&nbsp;/&nbsp;<b>→</b> for Portugal.</p>
+          <div class="loadblock" id="loadblock">
+            <div class="progress"><div class="progress-fill" id="progressFill"></div></div>
+            <p class="status"><span id="loadStatus">Loading photos…</span> <span id="progressPct">0%</span></p>
+          </div>
+          <button class="btn" id="startBtn" disabled>Loading…</button>
           <div id="startErr" class="err"></div>
         </div>
         <div id="resultView" class="hidden">
@@ -253,7 +271,7 @@
     { label: "Portugal",   terms: "Portugal" }
   ];
   const API = "https://commons.wikimedia.org/w/api.php";
-  const TARGET_PER_PLACE = 28; // pool size goal per country
+  const TARGET_PER_PLACE = 16; // pool size goal per country (a 2-min game shows ~24 max)
   const FLASH_MS = 5000;
   const ROUND_MS = 120000; // 2 minutes
 
@@ -268,12 +286,14 @@
   // --- Elements ---
   const $ = (id) => document.getElementById(id);
   const photo = $("photo"), flashbar = $("flashbar"), verdict = $("verdict");
-  const overlay = $("overlay"), startView = $("startView"), loadingView = $("loadingView");
-  const resultView = $("resultView"), loadingMsg = $("loadingMsg"), startErr = $("startErr");
+  const overlay = $("overlay"), startView = $("startView");
+  const resultView = $("resultView"), startErr = $("startErr");
   const elScore = $("score"), elStreak = $("streak"), elTimer = $("timer");
   const btnCA = $("guessCA"), btnPT = $("guessPT");
   const credit = $("credit");
   const progressFill = $("progressFill"), progressPct = $("progressPct");
+  const startBtn = $("startBtn"), loadStatus = $("loadStatus"), loadblock = $("loadblock");
+  let ready = false;
 
   function setProgress(p) {
     const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
@@ -358,7 +378,7 @@
         tasks.push({ topic, place });
       }
     }
-    const ENOUGH = 12; // start once both sides have at least this many
+    const ENOUGH = 14; // gather at least this many per side before assembling
     let done = 0;
 
     function assemble() {
@@ -505,7 +525,6 @@
     $("finalDetail").textContent =
       correct + " correct of " + answered + " · " + acc + "% accuracy · best streak " + bestStreak;
     startView.classList.add("hidden");
-    loadingView.classList.add("hidden");
     resultView.classList.remove("hidden");
     overlay.classList.remove("hidden");
   }
@@ -514,44 +533,74 @@
     return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   }
 
-  async function loadAndStart() {
-    startView.classList.add("hidden");
-    resultView.classList.add("hidden");
-    loadingView.classList.remove("hidden");
+  // Fetch the pool and fully preload every photo up front, then say "Ready".
+  async function loadPhotos() {
+    ready = false;
+    startBtn.disabled = true;
+    startBtn.classList.remove("ready");
+    startBtn.textContent = "Loading…";
     startErr.textContent = "";
+    loadblock.classList.remove("hidden");
+    loadStatus.parentElement.classList.remove("ready");
+    loadStatus.textContent = "Gathering photos…";
+    progressPct.textContent = "0%";
+    setProgress(0);
     try {
-      if (pool.length === 0) {
-        loadingMsg.textContent = "Gathering photos from both coasts…";
-        setProgress(0);
-        pool = await buildPool((p) => setProgress(p * 0.85));
-        // Only wait for the FIRST photo; the rest load in the background
-        // (there's a 5s gap between flashes, and showImage prefetches ahead).
-        loadingMsg.textContent = "Loading first photo…";
-        await preload(pool[0]).catch(() => null);
-        pool.slice(1, 5).forEach((it) => preload(it).catch(() => {}));
-        setProgress(1);
-      }
-      loadingView.classList.add("hidden");
-      startGame();
+      pool = await buildPool((p) => setProgress(p * 0.4));
+      // Preload every photo so the whole game runs without a hitch.
+      loadStatus.textContent = "Loading photos…";
+      let done = 0;
+      await Promise.all(pool.map((it) =>
+        preload(it).catch(() => null).then(() => {
+          done++;
+          setProgress(0.4 + (done / pool.length) * 0.6);
+        })
+      ));
+      setProgress(1);
+      ready = true;
+      progressPct.textContent = "";
+      loadStatus.parentElement.classList.add("ready");
+      loadStatus.textContent = "Ready — hit Start! 🎉";
+      startBtn.disabled = false;
+      startBtn.textContent = "Start";
+      startBtn.classList.add("ready");
     } catch (e) {
       console.error("Load failed:", e);
-      loadingView.classList.add("hidden");
-      startView.classList.remove("hidden");
-      startErr.textContent = "Couldn't load images (" + (e && e.message ? e.message : "network") +
-        "). Tap Start to retry.";
+      progressPct.textContent = "";
+      loadStatus.textContent = "";
+      startErr.textContent = "Couldn't load photos (" + (e && e.message ? e.message : "network") + ").";
+      startBtn.disabled = false;
+      startBtn.textContent = "Retry";
     }
   }
 
+  function beginGame() {
+    if (!ready) { loadPhotos(); return; }  // Retry button path
+    startBtn.classList.remove("ready");
+    startGame();
+  }
+
   // --- Wire up ---
-  $("startBtn").addEventListener("click", loadAndStart);
-  $("againBtn").addEventListener("click", loadAndStart);
+  startBtn.addEventListener("click", beginGame);
+  $("againBtn").addEventListener("click", beginGame);
   btnCA.addEventListener("click", () => resolve("California"));
   btnPT.addEventListener("click", () => resolve("Portugal"));
   document.addEventListener("keydown", (e) => {
+    // Enter/Space starts the game once photos are ready.
+    if (ready && overlay.classList.contains("hidden") === false &&
+        startView.classList.contains("hidden") === false &&
+        (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      beginGame();
+      return;
+    }
     if (locked) return;
     if (e.key === "ArrowLeft") resolve("California");
     else if (e.key === "ArrowRight") resolve("Portugal");
   });
+
+  // Start fetching + preloading photos immediately on page load.
+  loadPhotos();
 })();
 </script>
 </body>
