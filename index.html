@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>California or Portugal?</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌅</text></svg>" />
 <style>
   :root {
     --ca: #ff7a59;     /* sunset orange */
@@ -357,25 +358,44 @@
         tasks.push({ topic, place });
       }
     }
+    const ENOUGH = 12; // start once both sides have at least this many
     let done = 0;
-    await Promise.all(tasks.map(async (t) => {
-      try {
-        const items = await fetchFiles(t.topic + " " + t.place.terms, t.place.label);
-        for (const it of items) {
-          if (seen[t.place.label].has(it.url)) continue;
-          seen[t.place.label].add(it.url);
-          byPlace[t.place.label].push(it);
+
+    function assemble() {
+      const n = Math.min(byPlace.California.length, byPlace.Portugal.length);
+      if (n < 4) return null;
+      const ca = shuffle(byPlace.California).slice(0, Math.min(n, TARGET_PER_PLACE));
+      const pt = shuffle(byPlace.Portugal).slice(0, Math.min(n, TARGET_PER_PLACE));
+      return shuffle(ca.concat(pt));
+    }
+
+    // Resolve as soon as we have enough images — don't wait for slow stragglers.
+    return await new Promise((resolveOuter, rejectOuter) => {
+      let settled = false;
+      const finish = (val, err) => {
+        if (settled) return;
+        settled = true;
+        err ? rejectOuter(err) : resolveOuter(val);
+      };
+      tasks.forEach(async (t) => {
+        try {
+          const items = await fetchFiles(t.topic + " " + t.place.terms, t.place.label);
+          for (const it of items) {
+            if (seen[t.place.label].has(it.url)) continue;
+            seen[t.place.label].add(it.url);
+            byPlace[t.place.label].push(it);
+          }
+        } catch (e) { /* skip this topic */ }
+        done++;
+        if (onProgress) onProgress(done / tasks.length);
+        if (byPlace.California.length >= ENOUGH && byPlace.Portugal.length >= ENOUGH) {
+          finish(assemble());
+        } else if (done === tasks.length) {
+          const pool = assemble();
+          pool ? finish(pool) : finish(null, new Error("not enough images"));
         }
-      } catch (e) { /* skip this topic */ }
-      done++;
-      if (onProgress) onProgress(done / tasks.length);
-    }));
-    // Balance the two sides so the answer split is roughly even.
-    const n = Math.min(byPlace.California.length, byPlace.Portugal.length);
-    if (n < 4) throw new Error("not enough images");
-    const ca = shuffle(byPlace.California).slice(0, Math.min(n, TARGET_PER_PLACE));
-    const pt = shuffle(byPlace.Portugal).slice(0, Math.min(n, TARGET_PER_PLACE));
-    return shuffle(ca.concat(pt));
+      });
+    });
   }
 
   // Preload an image element; resolves on load, rejects on error/timeout.
@@ -503,17 +523,12 @@
       if (pool.length === 0) {
         loadingMsg.textContent = "Gathering photos from both coasts…";
         setProgress(0);
-        pool = await buildPool((p) => setProgress(p * 0.8));
-        // Warm up the first handful so the opening flash is instant.
-        loadingMsg.textContent = "Loading first photos…";
-        const warm = pool.slice(0, 5);
-        let w = 0;
-        await Promise.all(warm.map((it) =>
-          preload(it).catch(() => null).then(() => {
-            w++;
-            setProgress(0.8 + (w / warm.length) * 0.2);
-          })
-        ));
+        pool = await buildPool((p) => setProgress(p * 0.85));
+        // Only wait for the FIRST photo; the rest load in the background
+        // (there's a 5s gap between flashes, and showImage prefetches ahead).
+        loadingMsg.textContent = "Loading first photo…";
+        await preload(pool[0]).catch(() => null);
+        pool.slice(1, 5).forEach((it) => preload(it).catch(() => {}));
         setProgress(1);
       }
       loadingView.classList.add("hidden");
