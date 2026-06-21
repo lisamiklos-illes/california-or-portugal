@@ -117,6 +117,7 @@
     text-align: center;
     padding: 40px 32px;
     gap: 22px;
+    overflow-y: auto;
   }
   .overlay.hidden { display: none; }
   .overlay > div {
@@ -155,6 +156,64 @@
   }
   .status { font-size: 13px; color: var(--muted); margin: 0; font-variant-numeric: tabular-nums; }
   .status.ready { color: var(--good); font-size: 15px; font-weight: 600; }
+
+  .nameinput {
+    appearance: none;
+    width: 280px; max-width: 85%;
+    padding: 13px 16px;
+    border-radius: 12px;
+    border: 1px solid #38405a;
+    background: #0f121b;
+    color: var(--text);
+    font-size: 16px;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .nameinput::placeholder { color: #6b748a; }
+  .nameinput:focus { border-color: var(--pt); }
+
+  /* pause button on the stage */
+  .pausebtn {
+    position: absolute; top: 12px; right: 12px; z-index: 5;
+    width: 42px; height: 42px; border-radius: 50%;
+    border: none; cursor: pointer;
+    background: rgba(12,14,20,0.55);
+    color: #fff; font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+    transition: background 0.15s ease, transform 0.08s ease;
+  }
+  .pausebtn:hover { background: rgba(12,14,20,0.85); }
+  .pausebtn:active { transform: scale(0.92); }
+  .pausebtn.hidden { display: none; }
+
+  /* leaderboard */
+  .leaderboard { width: 280px; max-width: 90%; }
+  .leaderboard:empty { display: none; }
+  .lb-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .lb-list {
+    list-style: none; margin: 0; padding: 0;
+    counter-reset: rank;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .lb-list li {
+    counter-increment: rank;
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 12px;
+    background: #0f121b;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .lb-list li::before {
+    content: counter(rank);
+    color: var(--muted); font-weight: 700;
+    min-width: 18px; text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .lb-list li.me { background: rgba(42,157,143,0.22); outline: 1px solid var(--pt); }
+  .lb-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-score { font-weight: 700; font-variant-numeric: tabular-nums; }
 
   /* ---- Controls ---- */
   .controls {
@@ -229,13 +288,16 @@
       <img id="photo" alt="" />
       <div class="flashbar" id="flashbar"></div>
       <div class="verdict" id="verdict"></div>
+      <button class="pausebtn hidden" id="pauseBtn" aria-label="Pause" title="Pause (P)">⏸</button>
 
-      <!-- Start / Loading / Results overlay -->
+      <!-- Start / Pause / Results overlay -->
       <div class="overlay" id="overlay">
         <div id="startView">
           <h1><span class="ca">California</span> or <span class="pt">Portugal</span>?</h1>
           <p>You'll see a photo for <b>5 seconds</b>. Guess where it was taken — score as many as you can in <b>2 minutes</b>.</p>
           <p class="hint">Tap the buttons, or press <b>←</b> for California&nbsp;/&nbsp;<b>→</b> for Portugal.</p>
+          <input id="nameInput" class="nameinput" type="text" maxlength="16" autocomplete="off"
+                 placeholder="Your name (for the leaderboard)" />
           <div class="loadblock" id="loadblock">
             <div class="progress"><div class="progress-fill" id="progressFill"></div></div>
             <p class="status"><span id="loadStatus">Loading photos…</span> <span id="progressPct">0%</span></p>
@@ -243,10 +305,16 @@
           <button class="btn" id="startBtn" disabled>Loading…</button>
           <div id="startErr" class="err"></div>
         </div>
+        <div id="pauseView" class="hidden">
+          <h1>Paused</h1>
+          <p>Take a breath — the clock is stopped.</p>
+          <button class="btn" id="resumeBtn">Resume</button>
+        </div>
         <div id="resultView" class="hidden">
           <p>Time! You scored</p>
           <div class="big" id="finalScore">0</div>
           <p id="finalDetail"></p>
+          <div class="leaderboard" id="leaderboard"></div>
           <button class="btn" id="againBtn">Play again</button>
         </div>
       </div>
@@ -280,8 +348,13 @@
   let queue = [];         // shuffled play order
   let idx = 0;
   let score = 0, streak = 0, bestStreak = 0, answered = 0, correct = 0;
-  let roundEndAt = 0;
-  let flashTimer = null, tick = null, locked = true, current = null;
+  let roundEndAt = 0, flashDeadline = 0, verdictUntil = 0;
+  let tick = null, current = null;
+  let phase = "idle";        // "idle" | "flash" (awaiting answer) | "verdict"
+  let paused = false, pauseAt = 0;
+
+  const LB_KEY = "ca_pt_leaderboard_v1";
+  const NAME_KEY = "ca_pt_name";
 
   // --- Elements ---
   const $ = (id) => document.getElementById(id);
@@ -293,7 +366,35 @@
   const credit = $("credit");
   const progressFill = $("progressFill"), progressPct = $("progressPct");
   const startBtn = $("startBtn"), loadStatus = $("loadStatus"), loadblock = $("loadblock");
+  const pauseBtn = $("pauseBtn"), pauseView = $("pauseView");
+  const nameInput = $("nameInput"), leaderboardEl = $("leaderboard");
   let ready = false;
+
+  // --- Local leaderboard (saved in this browser) ---
+  function loadLB() {
+    try { return JSON.parse(localStorage.getItem(LB_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  function recordScore(entry) {
+    const list = loadLB();
+    list.push(entry);
+    list.sort((a, b) => (b.score - a.score) || (b.acc - a.acc) || (a.ts - b.ts));
+    const top = list.slice(0, 25);
+    try { localStorage.setItem(LB_KEY, JSON.stringify(top)); } catch (e) {}
+    return top;
+  }
+  function renderLeaderboard(highlightId) {
+    const list = loadLB().slice(0, 5);
+    if (!list.length) { leaderboardEl.innerHTML = ""; return; }
+    let html = '<div class="lb-title">🏆 Top scores</div><ol class="lb-list">';
+    list.forEach((e) => {
+      const cls = e.id === highlightId ? ' class="me"' : '';
+      html += '<li' + cls + '><span class="lb-name">' + escapeHtml(e.name) +
+        '</span><span class="lb-score">' + e.score + '</span></li>';
+    });
+    html += '</ol>';
+    leaderboardEl.innerHTML = html;
+  }
 
   function setProgress(p) {
     const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
@@ -333,7 +434,7 @@
       gsroffset: String(Math.floor(Math.random() * 40)), // vary results each session
       prop: "imageinfo",
       iiprop: "url|mime|size|extmetadata",
-      iiurlwidth: "1000"
+      iiurlwidth: "720" // lighter thumbnails for slower connections
     });
     const url = API + "?" + params.toString();
     // One quick retry in case the first attempt times out or blips.
@@ -439,7 +540,17 @@
     const left = roundEndAt - Date.now();
     elTimer.textContent = fmtTime(left);
     elTimer.classList.toggle("warn", left <= 15000);
-    if (left <= 0) endGame();
+  }
+
+  // Single loop drives the clock, the flash timeout, and the verdict gap —
+  // all off absolute deadlines, so pausing just shifts the deadlines.
+  function gameLoop() {
+    if (paused) return;
+    setTimerDisplay();
+    const now = Date.now();
+    if (now >= roundEndAt) { endGame(); return; }
+    if (phase === "flash" && now >= flashDeadline) resolve(null);
+    else if (phase === "verdict" && now >= verdictUntil) advanceNext();
   }
 
   function showImage() {
@@ -457,26 +568,24 @@
     // restart flash bar animation
     flashbar.classList.remove("run");
     void flashbar.offsetWidth; // reflow to reset animation
+    flashbar.style.animationPlayState = "running";
     flashbar.classList.add("run");
-    locked = false;
+    phase = "flash";
+    flashDeadline = Date.now() + FLASH_MS;
     btnCA.disabled = false;
     btnPT.disabled = false;
-    clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => { if (!locked) resolve(null); }, FLASH_MS);
   }
 
   function resolve(guess) {
-    if (locked) return;
-    locked = true;
+    if (phase !== "flash") return;
+    phase = "verdict";
     btnCA.disabled = true;
     btnPT.disabled = true;
     flashbar.classList.remove("run");
-    clearTimeout(flashTimer);
 
     const truth = current.label;
     answered++;
-    let isCorrect = guess === truth;
-    if (guess === null) isCorrect = false; // timed out
+    const isCorrect = guess === truth; // null (timeout) is never correct
 
     verdict.className = "verdict show " + (isCorrect ? "good" : "bad");
     if (isCorrect) {
@@ -491,21 +600,57 @@
     elStreak.textContent = streak;
 
     idx++;
-    setTimeout(() => {
-      verdict.className = "verdict";
-      showImage();
-    }, 650);
+    verdictUntil = Date.now() + 650;
+  }
+
+  function advanceNext() {
+    verdict.className = "verdict";
+    showImage();
+  }
+
+  function pauseGame() {
+    if (paused || phase === "idle") return;
+    if (!overlay.classList.contains("hidden")) return; // only while playing
+    paused = true;
+    pauseAt = Date.now();
+    flashbar.style.animationPlayState = "paused";
+    btnCA.disabled = true;
+    btnPT.disabled = true;
+    pauseBtn.classList.add("hidden");
+    startView.classList.add("hidden");
+    resultView.classList.add("hidden");
+    pauseView.classList.remove("hidden");
+    overlay.classList.remove("hidden");
+  }
+
+  function resumeGame() {
+    if (!paused) return;
+    const delta = Date.now() - pauseAt;     // shift every deadline forward
+    roundEndAt += delta;
+    if (flashDeadline) flashDeadline += delta;
+    if (verdictUntil) verdictUntil += delta;
+    paused = false;
+    pauseView.classList.add("hidden");
+    overlay.classList.add("hidden");
+    flashbar.style.animationPlayState = "running";
+    if (phase === "flash") { btnCA.disabled = false; btnPT.disabled = false; }
+    pauseBtn.classList.remove("hidden");
   }
 
   function startGame() {
     score = 0; streak = 0; bestStreak = 0; answered = 0; correct = 0; idx = 0;
+    paused = false;
+    phase = "idle";
+    flashDeadline = 0; verdictUntil = 0;
     elScore.textContent = "0";
     elStreak.textContent = "0";
     queue = shuffle(pool.slice());
     overlay.classList.add("hidden");
+    pauseView.classList.add("hidden");
+    pauseBtn.classList.remove("hidden");
     roundEndAt = Date.now() + ROUND_MS;
     clearInterval(tick);
-    tick = setInterval(setTimerDisplay, 200);
+    tick = setInterval(gameLoop, 100);
     setTimerDisplay();
     showImage();
   }
@@ -513,18 +658,33 @@
   function endGame() {
     if (overlay.classList.contains("hidden") === false && resultView.classList.contains("hidden") === false) return;
     clearInterval(tick);
-    clearTimeout(flashTimer);
-    locked = true;
+    paused = false;
+    phase = "idle";
     btnCA.disabled = true;
     btnPT.disabled = true;
+    pauseBtn.classList.add("hidden");
     flashbar.classList.remove("run");
     verdict.className = "verdict";
     elTimer.textContent = "0:00";
-    $("finalScore").textContent = score;
+    elTimer.classList.remove("warn");
+
     const acc = answered ? Math.round((correct / answered) * 100) : 0;
+    $("finalScore").textContent = score;
     $("finalDetail").textContent =
       correct + " correct of " + answered + " · " + acc + "% accuracy · best streak " + bestStreak;
+
+    // Save to the local leaderboard and render it.
+    const name = (nameInput.value.trim() || "Anon").slice(0, 16);
+    try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
+    const entry = {
+      id: Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+      name, score, acc, ts: Date.now()
+    };
+    recordScore(entry);
+    renderLeaderboard(entry.id);
+
     startView.classList.add("hidden");
+    pauseView.classList.add("hidden");
     resultView.classList.remove("hidden");
     overlay.classList.remove("hidden");
   }
@@ -580,26 +740,46 @@
     startGame();
   }
 
+  function startScreenVisible() {
+    return !overlay.classList.contains("hidden") && !startView.classList.contains("hidden");
+  }
+
   // --- Wire up ---
   startBtn.addEventListener("click", beginGame);
   $("againBtn").addEventListener("click", beginGame);
+  pauseBtn.addEventListener("click", pauseGame);
+  $("resumeBtn").addEventListener("click", resumeGame);
   btnCA.addEventListener("click", () => resolve("California"));
   btnPT.addEventListener("click", () => resolve("Portugal"));
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && ready) { e.preventDefault(); beginGame(); }
+  });
   document.addEventListener("keydown", (e) => {
-    // Enter/Space starts the game once photos are ready.
-    if (ready && overlay.classList.contains("hidden") === false &&
-        startView.classList.contains("hidden") === false &&
-        (e.key === "Enter" || e.key === " ")) {
-      e.preventDefault();
-      beginGame();
+    const k = e.key;
+    // Resume from pause with Enter/Space/Esc/P.
+    if (paused) {
+      if (k === "Enter" || k === " " || k === "Escape" || k === "p" || k === "P") {
+        e.preventDefault(); resumeGame();
+      }
       return;
     }
-    if (locked) return;
-    if (e.key === "ArrowLeft") resolve("California");
-    else if (e.key === "ArrowRight") resolve("Portugal");
+    // Don't hijack typing in the name field (except Enter, handled above).
+    if (document.activeElement === nameInput) return;
+    // Enter/Space starts the game once photos are ready.
+    if (ready && startScreenVisible() && (k === "Enter" || k === " ")) {
+      e.preventDefault(); beginGame(); return;
+    }
+    // Pause during play.
+    if (phase === "flash" && (k === "Escape" || k === "p" || k === "P")) {
+      e.preventDefault(); pauseGame(); return;
+    }
+    if (phase !== "flash") return;
+    if (k === "ArrowLeft") resolve("California");
+    else if (k === "ArrowRight") resolve("Portugal");
   });
 
-  // Start fetching + preloading photos immediately on page load.
+  // Prefill the saved name, then start fetching + preloading photos right away.
+  try { nameInput.value = localStorage.getItem(NAME_KEY) || ""; } catch (e) {}
   loadPhotos();
 })();
 </script>

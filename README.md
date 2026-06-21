@@ -15,7 +15,9 @@ It's a single self-contained `index.html` — no build step, no dependencies.
 - **Locally:** just open `index.html` in a browser (needs an internet connection, since
   photos stream from Wikimedia).
 
-Tap the buttons, or use **←** for California / **→** for Portugal.
+Tap the buttons, or use **←** for California / **→** for Portugal. Press **P** or **Esc**
+to pause (the clock stops). Enter your name to appear on the local leaderboard — high scores
+are saved in your browser via `localStorage`.
 
 ## Hosting on Render
 
